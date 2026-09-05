@@ -9,9 +9,17 @@ MAX_HOLD_DAYS = 21          # ~1 calendar month of trading days -- hard cap on a
 RISK_REWARD_MULT = 2.0      # fallback target = entry + risk * this
 STOP_BUFFER_PCT = 0.5       # extra cushion below/above a calculated stop
 
-# ---- 20/50 EMA Crossover settings ----
+# ---- EMA Pullback settings ----
 EMA_FAST = 20
 EMA_SLOW = 50
+SWING_LOOKBACK_DAYS = 20        # bars used to find the recent swing high
+PULLBACK_MIN_PCT = 5.0          # minimum pullback from swing high
+PULLBACK_MAX_PCT = 15.0         # maximum pullback from swing high
+EMA_TOLERANCE_PCT = 2.0         # how close price must be to EMA20/EMA50
+VOLUME_CONFIRM_MULT = 1.0       # reversal-day volume vs 20-day avg volume
+MIN_AVG_VOLUME = 500_000        # 20-day average volume floor (liquidity filter)
+
+# ---- 20/50 EMA Crossover settings ----
 CROSSOVER_LOOKBACK_DAYS = 20     # bars used to find a recent swing low for the stop
 CROSSOVER_MIN_AVG_VOLUME = 500_000
 
