@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/analyze.py": {
+    "api/index.py": {
       "maxDuration": 60
     }
   }
