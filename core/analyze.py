@@ -18,8 +18,9 @@ import requests
 from SmartApi import SmartConnect
 
 import strategy
-import ema_crossover
-import breakout
+   import ema_crossover
+   import breakout
+   import rsi_divergence
 
 INSTRUMENT_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 HISTORY_DAYS_BACK = 400  # enough calendar days to cover EMA50 + lookback windows comfortably
