@@ -102,9 +102,10 @@ def analyze_symbol(symbol: str) -> dict:
         "ema20": round(float(ema20), 2),
         "ema50": round(float(ema50), 2),
         "pullback_setup": strategy.evaluate(df),
-        "crossover_setup": ema_crossover.evaluate(df),
-        "breakout_setup": breakout.evaluate(df),
-    }
+       "crossover_setup": ema_crossover.evaluate(df),
+       "breakout_setup": breakout.evaluate(df),
+       "rsi_divergence_setup": rsi_divergence.evaluate(df),
+   }
 
 
 if __name__ == "__main__":
