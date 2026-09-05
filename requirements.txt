@@ -1,0 +1,7 @@
+smartapi-python
+pyotp
+pandas
+requests
+logzero
+websocket-client
+pycryptodome
