@@ -7,8 +7,9 @@ scanner uses) and runs it through each strategy module.
 
 Required environment variables:
   ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP_SECRET
-"""
+"""   
 import os
+os.chdir("/tmp")
 import time
 from datetime import datetime, timedelta
 
