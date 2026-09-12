@@ -1,7 +1,7 @@
 """
 core/backtest.py
 
-Backtests all 4 strategies against a symbol's own history, so the
+Backtests all 5 strategies against a symbol's own history, so the
 verdict for a stock is based on how each strategy has actually performed
 on THAT stock, not a generic average across all stocks.
 
@@ -34,6 +34,7 @@ import strategy
 import ema_crossover
 import breakout
 import rsi_divergence
+import price_action
 
 BACKTEST_DAYS_BACK = 1825  # ~5 years -- stays within Angel SmartAPI's ~2000-day per-request cap
 
@@ -42,6 +43,7 @@ STRATEGIES = {
     "EMA Crossover": ema_crossover,
     "Volume Breakout": breakout,
     "RSI Divergence": rsi_divergence,
+    "Price Action": price_action,
 }
 
 

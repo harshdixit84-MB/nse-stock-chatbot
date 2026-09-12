@@ -111,7 +111,7 @@ def get_verdict(symbol: str) -> dict:
         result["note"] = "This setup is active today, but has no historical signals on this stock to back-test -- treat with extra caution."
     else:
         result["verdict"] = "NO_ACTIVE_SETUP"
-        result["note"] = "None of the 4 strategies have a setup active on this stock today. See strategy_ranking for what's historically worked best, to know what to watch for."
+        result["note"] = "None of the 5 strategies have a setup active on this stock today. See strategy_ranking for what's historically worked best, to know what to watch for."
 
     result["momentum_confirmation"] = _macd_confirmation(df)
 

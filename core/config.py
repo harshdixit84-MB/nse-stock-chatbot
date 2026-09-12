@@ -4,7 +4,7 @@ Kept separate from nse-swing-dashboard/scanner/config.py since this is its
 own standalone project, but mirrors the same tuning style.
 """
 
-# ---- Universal exit rule (across all 4 strategies) ----
+# ---- Universal exit rule (across all 5 strategies) ----
 MAX_HOLD_DAYS = 21          # ~1 calendar month of trading days -- hard cap on any trade's holding period
 RISK_REWARD_MULT = 2.0      # fallback target = entry + risk * this
 STOP_BUFFER_PCT = 0.5       # extra cushion below/above a calculated stop
@@ -27,3 +27,11 @@ CROSSOVER_MIN_AVG_VOLUME = 500_000
 BREAKOUT_LOOKBACK_DAYS = 20      # N-day high the close must break above
 BREAKOUT_VOLUME_MULT = 1.5       # breakout-day volume vs its 20-day average
 BREAKOUT_MIN_AVG_VOLUME = 500_000
+
+# ---- Price Action settings (pure candlestick + S/R, no EMA/RSI) ----
+PA_SWING_LOOKBACK = 5            # bars each side for a fractal swing high/low
+PA_SR_LOOKBACK_DAYS = 120        # how far back to look for support/resistance levels
+PA_SR_TOUCH_TOLERANCE_PCT = 1.0  # % tolerance for grouping nearby touches into one level
+PA_SR_MIN_TOUCHES = 2            # minimum touches for a level to count as real S/R
+PA_NEAR_SUPPORT_PCT = 2.0        # how close price must be to the support level to qualify
+PA_MIN_AVG_VOLUME = 500_000      # same liquidity floor as the other strategies

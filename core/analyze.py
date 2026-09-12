@@ -22,6 +22,7 @@ import strategy
 import ema_crossover
 import breakout
 import rsi_divergence
+import price_action
 
 INSTRUMENT_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 HISTORY_DAYS_BACK = 400  # enough calendar days to cover EMA50 + lookback windows comfortably
@@ -106,6 +107,7 @@ def analyze_symbol(symbol: str) -> dict:
         "crossover_setup": ema_crossover.evaluate(df),
         "breakout_setup": breakout.evaluate(df),
         "rsi_divergence_setup": rsi_divergence.evaluate(df),
+        "price_action_setup": price_action.evaluate(df),
     }
 
 
