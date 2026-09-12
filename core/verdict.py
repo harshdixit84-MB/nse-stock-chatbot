@@ -13,6 +13,7 @@ historical backtest, and MACD), rather than fetching 3 times separately.
 import pandas as pd
 
 from backtest import _fetch_extended_ohlcv, _run_one_strategy, _summarize, STRATEGIES
+from chart_read import get_chart_read
 
 
 def _compute_macd(close: pd.Series, fast=12, slow=26, signal=9):
@@ -114,6 +115,7 @@ def get_verdict(symbol: str) -> dict:
         result["note"] = "None of the 5 strategies have a setup active on this stock today. See strategy_ranking for what's historically worked best, to know what to watch for."
 
     result["momentum_confirmation"] = _macd_confirmation(df)
+    result["chart_read"] = get_chart_read(df)
 
     return result
 

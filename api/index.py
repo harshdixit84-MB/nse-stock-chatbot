@@ -59,6 +59,19 @@ def _format_verdict_message(result: dict) -> str:
     if macd:
         lines.append(f"\nMomentum (MACD): {macd['status']}")
 
+    chart = result.get("chart_read")
+    if chart and "error" not in chart:
+        lines.append(f"\n\U0001F4CA *Chart Read*")
+        lines.append(f"Trend: {chart['trend']}")
+        if chart["nearest_support"] is not None:
+            lines.append(f"Support: {chart['nearest_support']} ({chart['distance_to_support_pct']}% below)")
+        if chart["nearest_resistance"] is not None:
+            lines.append(f"Resistance: {chart['nearest_resistance']} ({chart['distance_to_resistance_pct']}% above)")
+        lines.append(f"Today's candle: {chart['todays_candle_pattern']} ({chart['todays_candle_bias']})")
+        lines.append(f"RSI(14): {chart['rsi_14']} -- {chart['rsi_zone']}")
+        lines.append(f"Volume: {chart['volume_vs_20d_avg']}")
+        lines.append(f"Reversal watch: {chart['reversal_watch']}")
+
     lines.append("\n_Ranking by backtested win rate:_")
     for r in result["strategy_ranking"]:
         flag = "\U0001F7E2" if r["active_today"] else "\u26aa"
