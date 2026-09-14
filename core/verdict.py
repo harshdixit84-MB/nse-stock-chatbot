@@ -14,6 +14,7 @@ import pandas as pd
 
 from backtest import _fetch_extended_ohlcv, _run_one_strategy, _summarize, STRATEGIES
 from chart_read import get_chart_read
+import narrative as narrative_module
 
 
 def _compute_macd(close: pd.Series, fast=12, slow=26, signal=9):
@@ -50,7 +51,7 @@ def _macd_confirmation(df: pd.DataFrame) -> dict:
     }
 
 
-def get_verdict(symbol: str) -> dict:
+def get_verdict(symbol: str, include_narrative: bool = False) -> dict:
     symbol = symbol.strip().upper()
     df = _fetch_extended_ohlcv(symbol)
     if df is None or df.empty:
@@ -116,6 +117,9 @@ def get_verdict(symbol: str) -> dict:
 
     result["momentum_confirmation"] = _macd_confirmation(df)
     result["chart_read"] = get_chart_read(df)
+
+    if include_narrative:
+        result["narrative"] = narrative_module.get_narrative(symbol, result, df)
 
     return result
 

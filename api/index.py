@@ -96,6 +96,7 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         query = parse_qs(urlparse(self.path).query)
         symbol = query.get("symbol", [""])[0].strip()
+        include_narrative = query.get("narrative", ["false"])[0].strip().lower() in ("1", "true", "yes")
 
         if not symbol:
             self.send_response(400)
@@ -106,7 +107,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = verdict.get_verdict(symbol)
+            result = verdict.get_verdict(symbol, include_narrative=include_narrative)
             status = 200
         except Exception as e:
             result = {"error": str(e)}
