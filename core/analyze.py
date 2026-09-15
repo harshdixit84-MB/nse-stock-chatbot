@@ -42,34 +42,48 @@ SESSION_CACHE_KEY = "angel_session_v1"
 SESSION_TTL_SECONDS = 8 * 3600  # Angel sessions are valid for the trading day; refreshed via generateToken well before this
 
 
-def _kv_get(key):
+def _kv_command(*command_parts):
+    """
+    Executes a single Redis command via Upstash's REST API using the
+    documented "body-style" format: POST to the bare REST URL (NOT a
+    /command/key sub-path) with the entire command -- including the
+    command name itself -- as a JSON array body. Confirmed against
+    Upstash's own current example:
+        curl https://{url} -H "Authorization: Bearer ..." \\
+             -d '["SET","foo","bar","EX","60"]'
+    Returns the "result" field, or None on any failure (including a
+    misconfigured/unreachable KV -- this must never break analysis).
+    """
     if not (UPSTASH_URL and UPSTASH_TOKEN):
         return None
     try:
-        resp = requests.get(
-            f"{UPSTASH_URL}/get/{key}",
+        resp = requests.post(
+            UPSTASH_URL,
             headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+            json=list(command_parts),
             timeout=10,
         )
         resp.raise_for_status()
-        result = resp.json().get("result")
-        return json.loads(result) if result else None
+        data = resp.json()
+        if data.get("error"):
+            return None
+        return data.get("result")
     except Exception:
-        return None  # KV being unreachable should never break analysis -- just skip the cache
+        return None
+
+
+def _kv_get(key):
+    result = _kv_command("GET", key)
+    if not result:
+        return None
+    try:
+        return json.loads(result)
+    except (TypeError, ValueError):
+        return None
 
 
 def _kv_set(key, value: dict, ttl_seconds: int):
-    if not (UPSTASH_URL and UPSTASH_TOKEN):
-        return
-    try:
-        requests.post(
-            f"{UPSTASH_URL}/set/{key}",
-            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
-            json=[json.dumps(value), "EX", ttl_seconds],
-            timeout=10,
-        )
-    except Exception:
-        pass  # best-effort -- a failed cache write just means the next cold start logs in fresh, same as today
+    _kv_command("SET", key, json.dumps(value), "EX", str(ttl_seconds))
 
 
 def _call_smartapi(fn, *args, **kwargs):
