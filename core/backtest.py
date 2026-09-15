@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from analyze import _login, _get_token, _call_smartapi
+from analyze import _login, _get_token, _call_smartapi, _looks_like_auth_error, _refresh_or_relogin
 from config import MAX_HOLD_DAYS
 
 import strategy
@@ -64,6 +64,11 @@ def _fetch_extended_ohlcv(symbol: str, days_back: int = BACKTEST_DAYS_BACK):
     }
     resp = _call_smartapi(smart_api.getCandleData, params)
     time.sleep(0.35)
+
+    if _looks_like_auth_error(resp):
+        smart_api = _refresh_or_relogin()
+        resp = _call_smartapi(smart_api.getCandleData, params)
+        time.sleep(0.35)
 
     if not resp or not resp.get("status") or not resp.get("data"):
         return None
