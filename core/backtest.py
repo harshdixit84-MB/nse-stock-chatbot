@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from analyze import _login, _get_token
+from analyze import _login, _get_token, _call_smartapi
 from config import MAX_HOLD_DAYS
 
 import strategy
@@ -62,7 +62,7 @@ def _fetch_extended_ohlcv(symbol: str, days_back: int = BACKTEST_DAYS_BACK):
         "fromdate": from_date,
         "todate": to_date,
     }
-    resp = smart_api.getCandleData(params)
+    resp = _call_smartapi(smart_api.getCandleData, params)
     time.sleep(0.35)
 
     if not resp or not resp.get("status") or not resp.get("data"):

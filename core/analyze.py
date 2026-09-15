@@ -31,13 +31,39 @@ _smart_api = None
 _token_cache = {}
 
 
+def _call_smartapi(fn, *args, **kwargs):
+    """
+    Wraps any SmartAPI SDK call (generateSession, getCandleData, ...).
+    When Angel's servers are rate-limiting this account, they return a
+    plain-text body ("Access denied because of exceeding access rate")
+    instead of JSON -- the SDK then throws a confusing internal parse
+    error ("Couldn't parse the JSON response received from the
+    server..."). This catches that specific case and re-raises a clear,
+    actionable message instead. Any other exception passes through
+    unchanged.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        msg = str(e)
+        if "exceeding access rate" in msg.lower() or "access denied" in msg.lower():
+            raise RuntimeError(
+                "Angel SmartAPI is rate-limiting this account right now "
+                "(too many requests in a short window). Wait a minute or "
+                "two before trying again -- this isn't a bug, it's the "
+                "broker's own rate limit."
+            ) from e
+        raise
+
+
 def _login():
     global _smart_api
     if _smart_api is not None:
         return _smart_api
     smart_api = SmartConnect(api_key=os.environ["ANGEL_API_KEY"])
     totp_code = pyotp.TOTP(os.environ["ANGEL_TOTP_SECRET"]).now()
-    session = smart_api.generateSession(
+    session = _call_smartapi(
+        smart_api.generateSession,
         os.environ["ANGEL_CLIENT_ID"], os.environ["ANGEL_PASSWORD"], totp_code
     )
     if not session or not session.get("status"):
@@ -73,7 +99,7 @@ def _fetch_ohlcv(symbol: str):
         "fromdate": from_date,
         "todate": to_date,
     }
-    resp = smart_api.getCandleData(params)
+    resp = _call_smartapi(smart_api.getCandleData, params)
     time.sleep(0.35)  # respect SmartAPI's rate limit
 
     if not resp or not resp.get("status") or not resp.get("data"):
