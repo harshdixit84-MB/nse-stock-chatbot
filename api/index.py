@@ -11,6 +11,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "core"))
 
 import verdict
+from analyze import _kv_get, _kv_set
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -128,6 +129,27 @@ class handler(BaseHTTPRequestHandler):
             update = json.loads(body)
         except Exception:
             update = {}
+
+        # Telegram retries a webhook delivery if it doesn't get a prompt
+        # response -- and a full 5-strategy backtest over ~5 years of
+        # daily data is genuinely slow, easily slow enough to trigger
+        # that. Without this check, each retry re-runs the ENTIRE
+        # analysis from scratch and sends ANOTHER reply -- which is
+        # exactly the "3 requests sent by the bot itself" symptom for
+        # one /analyze call. update_id is unique per Telegram update
+        # and IDENTICAL across retries of the same delivery, so this
+        # skips any update we've already started handling, using the
+        # same durable KV cache _login() already relies on.
+        update_id = update.get("update_id")
+        if update_id is not None:
+            dedupe_key = f"tg_update_{update_id}"
+            if _kv_get(dedupe_key):
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": true, "duplicate": true}')
+                return
+            _kv_set(dedupe_key, {"seen": True}, 600)  # 10 min -- comfortably longer than Telegram's retry window
 
         message = update.get("message", {})
         chat_id = message.get("chat", {}).get("id")
