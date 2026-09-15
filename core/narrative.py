@@ -20,17 +20,21 @@ Reuses the SAME df verdict.py already fetched via _fetch_extended_ohlcv
 existing "single fetch, reuse everywhere" design.
 
 Environment variables:
-  ANTHROPIC_API_KEY  -- required. No key, no narrative (fails soft, see
-                        get_narrative below -- never breaks the quant
-                        verdict response).
-  NARRATIVE_MODEL    -- optional, defaults to claude-sonnet-4-6.
+  GEMINI_API_KEY   -- required. No key, no narrative (fails soft, see
+                      get_narrative below -- never breaks the quant
+                      verdict response). Get one free, no credit card,
+                      at https://aistudio.google.com/apikey
+  NARRATIVE_MODEL  -- optional, defaults to gemini-2.5-flash (free-tier
+                      eligible). Kept as an env var, not hardcoded,
+                      since Google rotates model names/aliases every
+                      few months.
 """
 import os
 
 import requests
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.environ.get("NARRATIVE_MODEL", "claude-sonnet-4-6")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+NARRATIVE_MODEL = os.environ.get("NARRATIVE_MODEL", "gemini-2.5-flash")
 
 WEEKLY_WINDOW_DAYS = 180
 DAILY_WINDOW_DAYS = 30
@@ -117,13 +121,14 @@ Do not state any price level, support/resistance figure, or trade number that is
 def get_narrative(symbol, verdict_result, df):
     """
     Builds the two data windows from the SAME df verdict.py already
-    fetched, builds the prompt, and calls the Anthropic API. Returns
-    {"text": "...", "model": "..."} on success, or {"error": "..."} on
-    any failure -- this NEVER raises, so a narrative failure can never
-    break the underlying quant verdict response it's attached to.
+    fetched, builds the prompt, and calls the Gemini API (free tier,
+    no credit card). Returns {"text": "...", "model": "..."} on success,
+    or {"error": "..."} on any failure -- this NEVER raises, so a
+    narrative failure can never break the underlying quant verdict
+    response it's attached to.
     """
-    if not ANTHROPIC_API_KEY:
-        return {"error": "ANTHROPIC_API_KEY is not set -- narrative unavailable."}
+    if not GEMINI_API_KEY:
+        return {"error": "GEMINI_API_KEY is not set -- narrative unavailable. Get a free key (no credit card) at https://aistudio.google.com/apikey"}
 
     try:
         weekly_df, daily_df = build_price_windows(df)
@@ -133,25 +138,31 @@ def get_narrative(symbol, verdict_result, df):
         prompt = build_narrative_prompt(symbol, verdict_result, weekly_df, daily_df)
 
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{NARRATIVE_MODEL}:generateContent",
             headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
+                "x-goog-api-key": GEMINI_API_KEY,
+                "Content-Type": "application/json",
             },
             json={
-                "model": ANTHROPIC_MODEL,
-                "max_tokens": 400,
-                "messages": [{"role": "user", "content": prompt}],
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 500},
             },
             timeout=30,
         )
         resp.raise_for_status()
         data = resp.json()
-        text_blocks = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-        text = "\n".join(text_blocks).strip()
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            block_reason = data.get("promptFeedback", {}).get("blockReason")
+            if block_reason:
+                return {"error": f"Gemini declined to respond (reason: {block_reason})."}
+            return {"error": "Gemini returned no candidates."}
+
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "\n".join(p.get("text", "") for p in parts).strip()
         if not text:
-            return {"error": "LLM returned an empty response."}
-        return {"text": text, "model": ANTHROPIC_MODEL}
+            return {"error": "Gemini returned an empty response."}
+        return {"text": text, "model": NARRATIVE_MODEL}
     except Exception as e:
         return {"error": f"Narrative generation failed: {e}"}
