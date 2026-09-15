@@ -16,6 +16,12 @@ from analyze import _kv_get, _kv_set
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
+# Set to True to re-enable /analyze on Telegram. Currently off so the
+# web dashboard's Analyze button (api/index.py's do_GET) is the ONLY
+# thing drawing on the shared Angel SmartAPI rate-limit budget while
+# it's being tested -- both surfaces use the exact same account.
+TELEGRAM_ANALYZE_ENABLED = False
+
 
 def _send_telegram_message(chat_id, text):
     try:
@@ -158,18 +164,27 @@ class handler(BaseHTTPRequestHandler):
         if chat_id:
             lowered = text.lower()
             if lowered.startswith("/analyze"):
-                parts = text.split(maxsplit=1)
-                symbol = parts[1].strip() if len(parts) > 1 else ""
-                if not symbol:
-                    _send_telegram_message(chat_id, "Usage: /analyze SYMBOL (e.g. /analyze RELIANCE)")
+                if not TELEGRAM_ANALYZE_ENABLED:
+                    _send_telegram_message(
+                        chat_id,
+                        "The /analyze command is temporarily paused here while the "
+                        "web dashboard's Analyze button is being tested -- both draw "
+                        "from the same Angel SmartAPI account, so running both at once "
+                        "makes debugging harder. Use the web dashboard for now."
+                    )
                 else:
-                    _send_telegram_message(chat_id, f"Analyzing {symbol.upper()}... this can take up to 30 seconds.")
-                    try:
-                        result = verdict.get_verdict(symbol)
-                        reply = _format_verdict_message(result)
-                    except Exception as e:
-                        reply = f"Error analyzing {symbol}: {e}"
-                    _send_telegram_message(chat_id, reply)
+                    parts = text.split(maxsplit=1)
+                    symbol = parts[1].strip() if len(parts) > 1 else ""
+                    if not symbol:
+                        _send_telegram_message(chat_id, "Usage: /analyze SYMBOL (e.g. /analyze RELIANCE)")
+                    else:
+                        _send_telegram_message(chat_id, f"Analyzing {symbol.upper()}... this can take up to 30 seconds.")
+                        try:
+                            result = verdict.get_verdict(symbol)
+                            reply = _format_verdict_message(result)
+                        except Exception as e:
+                            reply = f"Error analyzing {symbol}: {e}"
+                        _send_telegram_message(chat_id, reply)
             elif lowered in ("/start", "/help"):
                 _send_telegram_message(chat_id, "Send /analyze SYMBOL to get a live trade verdict, e.g. /analyze RELIANCE")
 
