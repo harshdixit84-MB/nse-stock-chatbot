@@ -31,6 +31,7 @@ Environment variables:
 """
 import os
 
+import pandas as pd
 import requests
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -44,10 +45,17 @@ def build_price_windows(df):
     """
     Returns (weekly_df, daily_df) built from the tail of the df verdict.py
     already fetched -- no separate fetch.
-    """
-    daily_df = df.tail(DAILY_WINDOW_DAYS)
 
-    weekly_source = df.tail(WEEKLY_WINDOW_DAYS)
+    _fetch_extended_ohlcv (Angel SmartAPI) returns "Date" as a plain
+    column with a RangeIndex, not a DatetimeIndex -- unlike a yfinance-
+    style frame. Resampling to weekly needs a real DatetimeIndex, so
+    that's set here, on a copy, without touching what the caller has.
+    """
+    indexed = df.set_index(pd.to_datetime(df["Date"]))
+
+    daily_df = indexed.tail(DAILY_WINDOW_DAYS)
+
+    weekly_source = indexed.tail(WEEKLY_WINDOW_DAYS)
     weekly_df = weekly_source.resample("W").agg({
         "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum",
     }).dropna()
