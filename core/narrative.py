@@ -154,7 +154,17 @@ def get_narrative(symbol, verdict_result, df):
             },
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 500},
+                "generationConfig": {
+                    "maxOutputTokens": 2048,
+                    # Gemini 3 models think by default, and those thinking
+                    # tokens are drawn from the SAME maxOutputTokens budget
+                    # as the visible answer -- at "low" they still reason a
+                    # little, but leave enough room for the actual ~150-200
+                    # word narrative to finish instead of cutting off mid-
+                    # sentence. This is just narrating pre-computed numbers,
+                    # not solving anything that needs deep reasoning.
+                    "thinkingConfig": {"thinkingLevel": "low"},
+                },
             },
             timeout=30,
         )
