@@ -24,10 +24,11 @@ Environment variables:
                       get_narrative below -- never breaks the quant
                       verdict response). Get one free, no credit card,
                       at https://aistudio.google.com/apikey
-  NARRATIVE_MODEL  -- optional, defaults to gemini-2.5-flash (free-tier
-                      eligible). Kept as an env var, not hardcoded,
-                      since Google rotates model names/aliases every
-                      few months.
+  NARRATIVE_MODEL  -- optional, defaults to gemini-3-flash-preview.
+                      Kept as an env var, not hardcoded, since Google
+                      rotates model names/aliases every few months --
+                      Gemini 2.5 models (the prior default) are being
+                      shut down Oct 2026, which is why this changed.
 """
 import os
 
@@ -35,7 +36,7 @@ import pandas as pd
 import requests
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-NARRATIVE_MODEL = os.environ.get("NARRATIVE_MODEL", "gemini-2.5-flash")
+NARRATIVE_MODEL = os.environ.get("NARRATIVE_MODEL", "gemini-3-flash-preview")
 
 WEEKLY_WINDOW_DAYS = 180
 DAILY_WINDOW_DAYS = 30
