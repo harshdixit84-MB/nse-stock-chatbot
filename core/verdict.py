@@ -79,18 +79,24 @@ def get_verdict(symbol: str, include_narrative: bool = False) -> dict:
             "active_today": today_setup is not None,
             "signals": stats.get("signals", 0),
             "win_rate_pct": stats.get("win_rate_pct"),
+            "win_rate_lcb_pct": stats.get("win_rate_lcb_pct"),
             "avg_r_multiple": stats.get("avg_r_multiple"),
             "profit_factor": stats.get("profit_factor"),
             "low_sample_warning": stats.get("low_sample_warning", True),
         })
 
+    # Ranked by win_rate_lcb_pct (Wilson lower-bound), NOT raw win_rate_pct --
+    # raw win rate lets a handful of lucky trades on a low-signal strategy
+    # outrank a strategy with a much larger, more solid track record. The
+    # lower-bound metric discounts small samples toward 50% until they've
+    # actually earned a high ranking.
     ranked_sorted = sorted(
         ranked,
-        key=lambda r: (r["win_rate_pct"] is None, -(r["win_rate_pct"] or 0)),
+        key=lambda r: (r["win_rate_lcb_pct"] is None, -(r["win_rate_lcb_pct"] or 0)),
     )
 
-    active_with_data = [r for r in ranked_sorted if r["active_today"] and r["win_rate_pct"] is not None]
-    active_without_data = [r for r in ranked_sorted if r["active_today"] and r["win_rate_pct"] is None]
+    active_with_data = [r for r in ranked_sorted if r["active_today"] and r["win_rate_lcb_pct"] is not None]
+    active_without_data = [r for r in ranked_sorted if r["active_today"] and r["win_rate_lcb_pct"] is None]
 
     result = {
         "symbol": symbol,
@@ -106,6 +112,7 @@ def get_verdict(symbol: str, include_narrative: bool = False) -> dict:
         result["trade_plan"] = live_setups[pick["strategy"]]
         result["backtest"] = {
             "win_rate_pct": pick["win_rate_pct"],
+            "win_rate_lcb_pct": pick["win_rate_lcb_pct"],
             "signals": pick["signals"],
             "avg_r_multiple": pick["avg_r_multiple"],
             "profit_factor": pick["profit_factor"],

@@ -23,6 +23,7 @@ Required environment variables (same as analyze.py):
   ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP_SECRET
 """
 import time
+import math
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -136,14 +137,42 @@ def _run_one_strategy(df: pd.DataFrame, strategy_module, nifty_df: pd.DataFrame 
     return results
 
 
+def _wilson_lower_bound(wins: int, n: int, z: float = 1.96) -> float:
+    """
+    Wilson score interval lower bound on a win rate -- the standard fix
+    for comparing proportions estimated from different sample sizes.
+    A strategy that's 3-for-3 (100%) and one that's 26-for-40 (65%)
+    are NOT equally trustworthy; raw win rate treats them as if they
+    are. This discounts a small sample toward 50% until it has enough
+    signals to actually back up the raw number, so ranking by this
+    value (instead of raw win_rate_pct) stops a handful of lucky
+    trades from outranking a strategy with a large, solid track record.
+    Returns a fraction in [0, 1] -- multiply by 100 for a percentage.
+    """
+    if n == 0:
+        return 0.0
+    p_hat = wins / n
+    denom = 1 + z ** 2 / n
+    center = p_hat + z ** 2 / (2 * n)
+    margin = z * math.sqrt((p_hat * (1 - p_hat) + z ** 2 / (4 * n)) / n)
+    return max(0.0, (center - margin) / denom)
+
+
 def _summarize(results):
     if not results:
-        return {"signals": 0, "win_rate_pct": None, "avg_r_multiple": None, "profit_factor": None}
+        return {
+            "signals": 0,
+            "win_rate_pct": None,
+            "win_rate_lcb_pct": None,
+            "avg_r_multiple": None,
+            "profit_factor": None,
+        }
 
     wins = [r for r in results if r["r_multiple"] > 0]
     losses = [r for r in results if r["r_multiple"] <= 0]
 
     win_rate = len(wins) / len(results) * 100
+    win_rate_lcb = _wilson_lower_bound(len(wins), len(results)) * 100
     avg_r = sum(r["r_multiple"] for r in results) / len(results)
 
     gross_win = sum(r["r_multiple"] for r in wins)
@@ -153,6 +182,7 @@ def _summarize(results):
     return {
         "signals": len(results),
         "win_rate_pct": round(win_rate, 1),
+        "win_rate_lcb_pct": round(win_rate_lcb, 1),
         "avg_r_multiple": round(avg_r, 2),
         "profit_factor": profit_factor,
         "low_sample_warning": len(results) < 10,
