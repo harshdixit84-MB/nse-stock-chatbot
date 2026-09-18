@@ -7,7 +7,19 @@ own standalone project, but mirrors the same tuning style.
 # ---- Universal exit rule (across all 5 strategies) ----
 MAX_HOLD_DAYS = 21          # ~1 calendar month of trading days -- hard cap on any trade's holding period
 RISK_REWARD_MULT = 2.0      # fallback target = entry + risk * this
-STOP_BUFFER_PCT = 0.5       # extra cushion below/above a calculated stop
+
+# STOP_BUFFER_PCT is superseded by the ATR-based buffer below (see
+# core/risk.py). Left here only in case anything external still
+# imports it -- no strategy module uses it anymore.
+STOP_BUFFER_PCT = 0.5
+
+# ---- ATR-based stop buffer (replaces the fixed % buffer above) ----
+# Buffer = ATR_STOP_MULT * ATR(ATR_PERIOD), subtracted from each
+# strategy's own structural stop level (swing low / EMA50 / support /
+# pivot low). Scales the buffer to the stock's actual recent
+# volatility instead of a flat percentage of price.
+ATR_PERIOD = 14
+ATR_STOP_MULT = 0.5
 
 # ---- EMA Pullback settings ----
 EMA_FAST = 20

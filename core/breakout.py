@@ -14,8 +14,10 @@ from config import (
     BREAKOUT_VOLUME_MULT,
     BREAKOUT_MIN_AVG_VOLUME,
     RISK_REWARD_MULT,
-    STOP_BUFFER_PCT,
+    ATR_PERIOD,
+    ATR_STOP_MULT,
 )
+from risk import compute_atr, atr_stop
 
 
 def evaluate(df: pd.DataFrame):
@@ -35,6 +37,7 @@ def evaluate(df: pd.DataFrame):
     # against the range that came before it.
     df["PriorHigh"] = df["High"].shift(1).rolling(BREAKOUT_LOOKBACK_DAYS).max()
     df["RecentLow"] = df["Low"].rolling(10).min()
+    df["ATR"] = compute_atr(df, ATR_PERIOD)
 
     last = df.iloc[-1]
     close = last["Close"]
@@ -55,7 +58,8 @@ def evaluate(df: pd.DataFrame):
 
     # ---- Setup confirmed: build the trade plan ----
     recent_low = last["RecentLow"]
-    stop_loss = min(recent_low, prior_high) * (1 - STOP_BUFFER_PCT / 100)
+    structural_stop = min(recent_low, prior_high)
+    stop_loss = atr_stop(structural_stop, last["ATR"], ATR_STOP_MULT)
     risk_per_share = close - stop_loss
     if risk_per_share <= 0:
         return None

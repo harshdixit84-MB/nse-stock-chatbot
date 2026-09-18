@@ -15,8 +15,10 @@ from config import (
     CROSSOVER_LOOKBACK_DAYS,
     CROSSOVER_MIN_AVG_VOLUME,
     RISK_REWARD_MULT,
-    STOP_BUFFER_PCT,
+    ATR_PERIOD,
+    ATR_STOP_MULT,
 )
+from risk import compute_atr, atr_stop
 
 
 def evaluate(df: pd.DataFrame):
@@ -35,6 +37,7 @@ def evaluate(df: pd.DataFrame):
     df["EMA50"] = df["Close"].ewm(span=EMA_SLOW, adjust=False).mean()
     df["AvgVol20"] = df["Volume"].rolling(20).mean()
     df["SwingLow"] = df["Low"].rolling(CROSSOVER_LOOKBACK_DAYS).min()
+    df["ATR"] = compute_atr(df, ATR_PERIOD)
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -59,7 +62,8 @@ def evaluate(df: pd.DataFrame):
 
     # ---- Setup confirmed: build the trade plan ----
     swing_low = last["SwingLow"]
-    stop_loss = min(swing_low, ema50) * (1 - STOP_BUFFER_PCT / 100)
+    structural_stop = min(swing_low, ema50)
+    stop_loss = atr_stop(structural_stop, last["ATR"], ATR_STOP_MULT)
     risk_per_share = close - stop_loss
     if risk_per_share <= 0:
         return None

@@ -18,9 +18,11 @@ import pandas as pd
 
 from config import (
     RISK_REWARD_MULT,
-    STOP_BUFFER_PCT,
     MIN_AVG_VOLUME,
+    ATR_PERIOD,
+    ATR_STOP_MULT,
 )
+from risk import compute_atr, atr_stop
 
 RSI_PERIOD = 14
 PIVOT_LEFT = 5
@@ -72,6 +74,7 @@ def evaluate(df: pd.DataFrame):
 
     df = df.copy()
     rsi = _compute_rsi(df["Close"])
+    atr = compute_atr(df, ATR_PERIOD)
     lows = _find_rsi_pivot_lows(rsi)
 
     if len(lows) < 2:
@@ -102,7 +105,7 @@ def evaluate(df: pd.DataFrame):
     last = df.iloc[-1]
     close = last["Close"]
     pivot_low_price = price2
-    stop_loss = pivot_low_price * (1 - STOP_BUFFER_PCT / 100)
+    stop_loss = atr_stop(pivot_low_price, atr.iloc[-1], ATR_STOP_MULT)
     risk_per_share = close - stop_loss
     if risk_per_share <= 0:
         return None

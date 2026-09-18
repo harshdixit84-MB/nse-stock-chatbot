@@ -30,8 +30,10 @@ from config import (
     PA_NEAR_SUPPORT_PCT,
     PA_MIN_AVG_VOLUME,
     RISK_REWARD_MULT,
-    STOP_BUFFER_PCT,
+    ATR_PERIOD,
+    ATR_STOP_MULT,
 )
+from risk import compute_atr, atr_stop
 
 
 def _is_hammer(row):
@@ -131,6 +133,7 @@ def evaluate(df: pd.DataFrame):
 
     df = df.copy()
     df["AvgVol20"] = df["Volume"].rolling(20).mean()
+    df["ATR"] = compute_atr(df, ATR_PERIOD)
 
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -166,7 +169,7 @@ def evaluate(df: pd.DataFrame):
         return None
 
     # ---- All filters passed: build the trade plan ----
-    stop_loss = nearest_support * (1 - STOP_BUFFER_PCT / 100)
+    stop_loss = atr_stop(nearest_support, last["ATR"], ATR_STOP_MULT)
     risk_per_share = close - stop_loss
     if risk_per_share <= 0:
         return None
