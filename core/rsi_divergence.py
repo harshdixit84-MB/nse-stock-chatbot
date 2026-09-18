@@ -12,6 +12,17 @@ PIVOT_RIGHT bars after it forms (same lag TradingView's indicator has in
 real time). evaluate() only fires if that confirmation lands exactly on
 the LAST row -- a yes/no check on "did the signal just confirm on this
 bar," not a lookback scan.
+
+Two extra preconditions beyond the raw RSI/price divergence (added after
+a research review flagged that divergence alone, with no trend context
+or confirmation, is one of the weaker signals in isolation):
+  1. A real prior decline (>= MIN_PRIOR_DECLINE_PCT from the recent high)
+     into the first pivot -- divergence is meant to flag weakening
+     momentum inside an actual downtrend, not fire on two arbitrary
+     RSI wiggles in a flat/choppy stretch.
+  2. A bullish reversal candle (hammer or engulfing) AT the second pivot
+     itself -- confirms actual buying showed up at the low, not just
+     that RSI curled up.
 """
 
 import pandas as pd
@@ -23,12 +34,23 @@ from config import (
     ATR_STOP_MULT,
 )
 from risk import compute_atr, atr_stop
+from strategy import _is_hammer, _is_bullish_engulfing
 
+# ---- RSI Divergence config ----
 RSI_PERIOD = 14
 PIVOT_LEFT = 5
 PIVOT_RIGHT = 5
 RANGE_LOWER = 5
 RANGE_UPPER = 60
+
+# A divergence only means something if it follows a genuine downtrend --
+# research on this strategy is consistent that a raw divergence signal
+# taken in isolation, with no established prior trend, is unreliable;
+# it's meant to flag WEAKENING of an existing decline, not fire as a
+# standalone reversal trigger. Require the stock to have actually fallen
+# at least this % from its recent high into the divergence's first pivot
+# before treating the divergence as valid.
+MIN_PRIOR_DECLINE_PCT = 8.0
 
 
 def _compute_rsi(close, period=RSI_PERIOD):
@@ -102,6 +124,28 @@ def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     if not (price2 < price1 and rsi2 > rsi1):
         return None
 
+    # Prior-downtrend precondition -- a divergence only means something as
+    # a warning of WEAKENING momentum inside an actual decline. Require a
+    # real prior fall from the recent high into the first pivot, not just
+    # two arbitrary RSI wiggles.
+    lookback_start = max(0, i1 - RANGE_UPPER)
+    swing_high_before = df["High"].iloc[lookback_start:i1 + 1].max()
+    if swing_high_before <= 0:
+        return None
+    decline_pct = (swing_high_before - price1) / swing_high_before * 100
+    if decline_pct < MIN_PRIOR_DECLINE_PCT:
+        return None
+
+    # Candlestick confirmation at the second (lower) pivot itself -- research
+    # on this strategy is clear that a raw divergence alone is much weaker
+    # than one confirmed by actual reversal price action at the low.
+    pivot_row = df.iloc[i2]
+    pivot_prev_row = df.iloc[i2 - 1]
+    is_hammer = _is_hammer(pivot_row)
+    is_engulfing = _is_bullish_engulfing(pivot_prev_row, pivot_row)
+    if not (is_hammer or is_engulfing):
+        return None
+
     # Liquidity filter
     avg_vol20 = df["Volume"].rolling(20).mean().iloc[-1]
     if pd.isna(avg_vol20) or avg_vol20 < MIN_AVG_VOLUME:
@@ -123,8 +167,9 @@ def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
         "target": round(float(target), 2),
         "risk_per_share": round(float(risk_per_share), 2),
         "reward_risk_ratio": round(float((target - close) / risk_per_share), 2),
-        "pattern": "Bullish RSI Divergence",
+        "pattern": "Bullish RSI Divergence" + (" + Hammer" if is_hammer else " + Bullish Engulfing"),
         "divergence_pivot_low": round(float(pivot_low_price), 2),
         "rsi_at_pivot": round(float(rsi2), 2),
+        "prior_decline_pct": round(float(decline_pct), 1),
         "avg_volume_20d": int(avg_vol20),
     }
