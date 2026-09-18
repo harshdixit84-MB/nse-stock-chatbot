@@ -41,10 +41,16 @@ def _is_bullish_engulfing(prev_row, row):
     return prior_bearish and is_bullish and engulfs
 
 
-def evaluate(df: pd.DataFrame):
+def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     """
     df must have columns: Open, High, Low, Close, Volume (most recent
     row last) and at least ~60 rows of history.
+
+    nifty_df is accepted for a uniform call signature across all 5
+    strategies but unused here -- EMA Pullback already requires ITS
+    OWN stock to be in an established uptrend, which is a stronger
+    condition than the index-level regime filter used by EMA Crossover
+    and Breakout.
 
     Returns a dict describing the setup if the LAST row qualifies,
     otherwise returns None.

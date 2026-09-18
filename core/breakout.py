@@ -18,9 +18,10 @@ from config import (
     ATR_STOP_MULT,
 )
 from risk import compute_atr, atr_stop
+from regime import is_bullish_on
 
 
-def evaluate(df: pd.DataFrame):
+def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     """
     df must have columns: Open, High, Low, Close, Volume (most recent
     row last) and at least ~BREAKOUT_LOOKBACK_DAYS + 20 rows.
@@ -56,6 +57,12 @@ def evaluate(df: pd.DataFrame):
     if last["Volume"] < avg_vol20 * BREAKOUT_VOLUME_MULT:
         return None
 
+    # 3. Market regime filter -- breakouts fail far more often when the
+    # broader market is choppy/range-bound; skip rather than chase a
+    # breakout against a downtrending index.
+    if not is_bullish_on(nifty_df, last["Date"]):
+        return None
+
     # ---- Setup confirmed: build the trade plan ----
     recent_low = last["RecentLow"]
     structural_stop = min(recent_low, prior_high)
@@ -75,4 +82,5 @@ def evaluate(df: pd.DataFrame):
         "pattern": f"{BREAKOUT_LOOKBACK_DAYS}-Day Breakout",
         "breakout_level": round(float(prior_high), 2),
         "avg_volume_20d": int(avg_vol20),
+        "nifty_regime": "nifty_uptrend" if nifty_df is not None else "not_checked",
     }

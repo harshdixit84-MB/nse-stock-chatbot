@@ -13,6 +13,7 @@ historical backtest, and MACD), rather than fetching 3 times separately.
 import pandas as pd
 
 from backtest import _fetch_extended_ohlcv, _run_one_strategy, _summarize, STRATEGIES
+from analyze import _fetch_index_ohlcv
 from chart_read import get_chart_read
 import narrative as narrative_module
 
@@ -61,11 +62,16 @@ def get_verdict(symbol: str, include_narrative: bool = False) -> dict:
     live_setups = {}
     ranked = []
 
+    try:
+        nifty_df = _fetch_index_ohlcv()
+    except Exception:
+        nifty_df = None  # regime filter fails open on None
+
     for name, module in STRATEGIES.items():
-        today_setup = module.evaluate(df)
+        today_setup = module.evaluate(df, nifty_df=nifty_df)
         live_setups[name] = today_setup
 
-        history_results = _run_one_strategy(df, module)
+        history_results = _run_one_strategy(df, module, nifty_df=nifty_df)
         stats = _summarize(history_results)
 
         ranked.append({

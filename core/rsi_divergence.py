@@ -58,11 +58,16 @@ def _find_rsi_pivot_lows(rsi, left=PIVOT_LEFT, right=PIVOT_RIGHT):
     return lows
 
 
-def evaluate(df: pd.DataFrame):
+def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     """
     df must have columns: Open, High, Low, Close, Volume (most recent
     row last) and enough history to cover RSI_PERIOD + RANGE_UPPER +
     PIVOT_LEFT + PIVOT_RIGHT bars.
+
+    nifty_df is accepted for a uniform call signature across all 5
+    strategies but unused here -- this is a reversal signal by nature,
+    so gating it on the broader market's trend would work against its
+    purpose.
 
     Returns a dict if a bullish RSI divergence's pivot gets CONFIRMED on
     the LAST row (i.e. the pivot formed PIVOT_RIGHT bars ago), otherwise

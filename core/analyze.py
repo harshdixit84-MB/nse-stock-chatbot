@@ -28,6 +28,14 @@ import price_action
 INSTRUMENT_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 HISTORY_DAYS_BACK = 400  # enough calendar days to cover EMA50 + lookback windows comfortably
 
+# Angel's own forum/docs disagree on which token returns historical
+# candle data for NIFTY 50 on a given account -- "26000" is the one
+# most historical getCandleData examples use successfully; "99926000"
+# is the newer AMXIDX entry that works for quotes but returns empty
+# candle data for some accounts. Probe both, keep whichever responds.
+NIFTY_TOKEN_CANDIDATES = ["26000", "99926000"]
+_index_token_cache = {"token": None}
+
 _smart_api = None
 _token_cache = {}
 
@@ -264,7 +272,49 @@ def _fetch_ohlcv(symbol: str):
     return df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
 
 
-def analyze_symbol(symbol: str) -> dict:
+def _fetch_index_ohlcv(days_back: int = 400 + 210):
+    """
+    Fetch NIFTY 50 daily OHLCV for the EMA Crossover / Breakout regime
+    filter (regime.py). 210 extra calendar days on top of the usual
+    history window so the 200-day EMA the regime filter needs has
+    enough runway even on the earliest bars analyzed.
+
+    Returns None (never raises) if NIFTY data can't be fetched --
+    regime.is_bullish_on() fails OPEN on None, so a NIFTY data outage
+    degrades to "regime filter not applied" rather than breaking
+    single-stock analysis or silently blocking every signal.
+    """
+    smart_api = _login()
+    to_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    from_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d %H:%M")
+
+    tokens_to_try = [_index_token_cache["token"]] if _index_token_cache["token"] else NIFTY_TOKEN_CANDIDATES
+    for token in tokens_to_try:
+        params = {
+            "exchange": "NSE",
+            "symboltoken": token,
+            "interval": "ONE_DAY",
+            "fromdate": from_date,
+            "todate": to_date,
+        }
+        try:
+            resp = _call_smartapi(smart_api.getCandleData, params)
+        except Exception:
+            continue
+        time.sleep(0.35)
+
+        if resp and resp.get("status") and resp.get("data"):
+            _index_token_cache["token"] = token
+            df = pd.DataFrame(resp["data"], columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.sort_values("Date").reset_index(drop=True)
+            for col in ["Open", "High", "Low", "Close", "Volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
+            if not df.empty:
+                return df
+
+    return None
     symbol = symbol.strip().upper()
     df = _fetch_ohlcv(symbol)
     if df is None or df.empty:
@@ -274,17 +324,22 @@ def analyze_symbol(symbol: str) -> dict:
     ema20 = df["Close"].ewm(span=20, adjust=False).mean().iloc[-1]
     ema50 = df["Close"].ewm(span=50, adjust=False).mean().iloc[-1]
 
+    try:
+        nifty_df = _fetch_index_ohlcv()
+    except Exception:
+        nifty_df = None  # regime filter fails open on None -- never block analysis on this
+
     return {
         "symbol": symbol,
         "last_close": round(float(last["Close"]), 2),
         "as_of": str(last["Date"].date()),
         "ema20": round(float(ema20), 2),
         "ema50": round(float(ema50), 2),
-        "pullback_setup": strategy.evaluate(df),
-        "crossover_setup": ema_crossover.evaluate(df),
-        "breakout_setup": breakout.evaluate(df),
-        "rsi_divergence_setup": rsi_divergence.evaluate(df),
-        "price_action_setup": price_action.evaluate(df),
+        "pullback_setup": strategy.evaluate(df, nifty_df=nifty_df),
+        "crossover_setup": ema_crossover.evaluate(df, nifty_df=nifty_df),
+        "breakout_setup": breakout.evaluate(df, nifty_df=nifty_df),
+        "rsi_divergence_setup": rsi_divergence.evaluate(df, nifty_df=nifty_df),
+        "price_action_setup": price_action.evaluate(df, nifty_df=nifty_df),
     }
 
 

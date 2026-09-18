@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from analyze import _login, _get_token, _call_smartapi, _looks_like_auth_error, _refresh_or_relogin
+from analyze import _login, _get_token, _call_smartapi, _looks_like_auth_error, _refresh_or_relogin, _fetch_index_ohlcv
 from config import MAX_HOLD_DAYS
 
 import strategy
@@ -110,7 +110,7 @@ def _simulate_trade(df: pd.DataFrame, entry_index: int, signal: dict):
     return {"r_multiple": r_multiple, "exit_index": idx}
 
 
-def _run_one_strategy(df: pd.DataFrame, strategy_module):
+def _run_one_strategy(df: pd.DataFrame, strategy_module, nifty_df: pd.DataFrame = None):
     results = []
     last_valid_i = len(df) - MAX_HOLD_DAYS - 1
     if last_valid_i < 1:
@@ -118,7 +118,11 @@ def _run_one_strategy(df: pd.DataFrame, strategy_module):
 
     for i in range(0, last_valid_i + 1):
         sub_df = df.iloc[: i + 1]
-        signal = strategy_module.evaluate(sub_df)
+        # nifty_df is passed in FULL (not sliced to i) -- regime.is_bullish_on()
+        # internally restricts to NIFTY rows <= this bar's own date, so this
+        # introduces no lookahead: at step i, only NIFTY data up to that
+        # historical day is ever looked at, exactly mirroring live analysis.
+        signal = strategy_module.evaluate(sub_df, nifty_df=nifty_df)
         if signal is None:
             continue
         outcome = _simulate_trade(df, i, signal)
@@ -163,8 +167,14 @@ def backtest_symbol(symbol: str) -> dict:
 
     output = {"symbol": symbol, "history_days": len(df), "strategies": {}}
 
+    try:
+        nifty_df = _fetch_index_ohlcv()
+    except Exception:
+        nifty_df = None
+    output["nifty_regime_filter_available"] = nifty_df is not None
+
     for name, module in STRATEGIES.items():
-        results = _run_one_strategy(df, module)
+        results = _run_one_strategy(df, module, nifty_df=nifty_df)
         output["strategies"][name] = _summarize(results)
 
     return output

@@ -19,9 +19,10 @@ from config import (
     ATR_STOP_MULT,
 )
 from risk import compute_atr, atr_stop
+from regime import is_bullish_on
 
 
-def evaluate(df: pd.DataFrame):
+def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     """
     df must have columns: Open, High, Low, Close, Volume (most recent
     row last) and at least ~EMA_SLOW + CROSSOVER_LOOKBACK_DAYS rows.
@@ -60,6 +61,12 @@ def evaluate(df: pd.DataFrame):
     if pd.isna(avg_vol20) or avg_vol20 < CROSSOVER_MIN_AVG_VOLUME:
         return None
 
+    # 4. Market regime filter -- crossover systems whipsaw badly when
+    # the broader market isn't trending; skip the signal rather than
+    # take it against a range-bound/downtrending index.
+    if not is_bullish_on(nifty_df, last["Date"]):
+        return None
+
     # ---- Setup confirmed: build the trade plan ----
     swing_low = last["SwingLow"]
     structural_stop = min(swing_low, ema50)
@@ -80,4 +87,5 @@ def evaluate(df: pd.DataFrame):
         "ema20": round(float(ema20), 2),
         "ema50": round(float(ema50), 2),
         "avg_volume_20d": int(avg_vol20),
+        "nifty_regime": "nifty_uptrend" if nifty_df is not None else "not_checked",
     }

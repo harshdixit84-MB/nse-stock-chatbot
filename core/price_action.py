@@ -119,10 +119,14 @@ def _find_support_resistance(df, lookback_days, tolerance_pct, min_touches):
     return cluster(recent["Low"].tolist()), cluster(recent["High"].tolist())
 
 
-def evaluate(df: pd.DataFrame):
+def evaluate(df: pd.DataFrame, nifty_df: pd.DataFrame = None):
     """
     df must have columns: Open, High, Low, Close, Volume (most recent
     row last) and at least ~PA_SR_LOOKBACK_DAYS rows.
+
+    nifty_df is accepted for a uniform call signature across all 5
+    strategies but unused here -- this strategy already requires ITS
+    OWN stock to show higher-highs/higher-lows trend structure.
 
     Returns a dict describing the setup if the LAST row qualifies,
     otherwise returns None.
