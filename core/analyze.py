@@ -49,6 +49,16 @@ UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 SESSION_CACHE_KEY = "angel_session_v1"
 SESSION_TTL_SECONDS = 8 * 3600  # Angel sessions are valid for the trading day; refreshed via generateToken well before this
 
+# NIFTY's own daily candles only change once per trading day -- caching
+# this avoids adding a SECOND Angel SmartAPI historical-data call to
+# EVERY single /api request (on top of the stock's own OHLCV fetch),
+# which is exactly the endpoint that was already the source of prior
+# rate-limit/timeout failures on this account. 6h comfortably covers
+# a full trading session without serving yesterday's close once a new
+# day's candle exists.
+NIFTY_CACHE_KEY = "nifty_ohlcv_cache_v1"
+NIFTY_CACHE_TTL_SECONDS = 6 * 3600
+
 
 def _kv_command(*command_parts):
     """
@@ -279,11 +289,28 @@ def _fetch_index_ohlcv(days_back: int = 400 + 210):
     history window so the 200-day EMA the regime filter needs has
     enough runway even on the earliest bars analyzed.
 
+    Cached in KV for NIFTY_CACHE_TTL_SECONDS -- without this, every
+    single /api request (both "Get Plan" and "Get AI Narrative") would
+    trigger a SECOND live Angel SmartAPI historical-data call in
+    addition to the stock's own OHLCV fetch, on an account that's
+    already rate-limit-sensitive. NIFTY's own daily candle only changes
+    once per session, so there is no reason to re-fetch it per request.
+
     Returns None (never raises) if NIFTY data can't be fetched --
     regime.is_bullish_on() fails OPEN on None, so a NIFTY data outage
     degrades to "regime filter not applied" rather than breaking
     single-stock analysis or silently blocking every signal.
     """
+    cached = _kv_get(NIFTY_CACHE_KEY)
+    if cached:
+        try:
+            df = pd.DataFrame(cached)
+            df["Date"] = pd.to_datetime(df["Date"])
+            if not df.empty:
+                return df
+        except Exception:
+            pass  # fall through to a live fetch if the cached shape is ever bad
+
     smart_api = _login()
     to_date = datetime.now().strftime("%Y-%m-%d %H:%M")
     from_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d %H:%M")
@@ -315,6 +342,9 @@ def _fetch_index_ohlcv(days_back: int = 400 + 210):
                 return df
 
     return None
+
+
+def analyze_symbol(symbol: str) -> dict:
     symbol = symbol.strip().upper()
     df = _fetch_ohlcv(symbol)
     if df is None or df.empty:
