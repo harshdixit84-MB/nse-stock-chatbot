@@ -104,6 +104,7 @@ class handler(BaseHTTPRequestHandler):
         query = parse_qs(urlparse(self.path).query)
         symbol = query.get("symbol", [""])[0].strip()
         include_narrative = query.get("narrative", ["false"])[0].strip().lower() in ("1", "true", "yes")
+        mode = query.get("mode", [""])[0].strip().lower()
 
         if not symbol:
             self.send_response(400)
@@ -114,7 +115,14 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = verdict.get_verdict(symbol, include_narrative=include_narrative)
+            if mode == "outlook":
+                # Nifty -> sector -> stock outlook (core/outlook.py). Imported
+                # here, not at the top of the file, so a problem in that module
+                # can never take down the existing plan/narrative endpoint.
+                import outlook
+                result = outlook.get_outlook(symbol)
+            else:
+                result = verdict.get_verdict(symbol, include_narrative=include_narrative)
             status = 200
         except Exception as e:
             result = {"error": str(e)}
