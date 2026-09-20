@@ -339,6 +339,11 @@ def _fetch_index_ohlcv(days_back: int = 400 + 210):
                 df[col] = pd.to_numeric(df[col], errors="coerce")
             df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
             if not df.empty:
+                # The cache read above existed but nothing ever wrote to it,
+                # so every request re-fetched NIFTY live from Angel.
+                cache_df = df.copy()
+                cache_df["Date"] = cache_df["Date"].astype(str)
+                _kv_set(NIFTY_CACHE_KEY, cache_df.to_dict(orient="records"), NIFTY_CACHE_TTL_SECONDS)
                 return df
 
     return None
