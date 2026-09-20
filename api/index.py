@@ -120,7 +120,8 @@ class handler(BaseHTTPRequestHandler):
                 # here, not at the top of the file, so a problem in that module
                 # can never take down the existing plan/narrative endpoint.
                 import outlook
-                result = outlook.get_outlook(symbol)
+                fresh = query.get("fresh", [""])[0].strip().lower() in ("1", "true", "yes")
+                result = outlook.get_outlook(symbol, use_cache=not fresh)
             else:
                 result = verdict.get_verdict(symbol, include_narrative=include_narrative)
             status = 200

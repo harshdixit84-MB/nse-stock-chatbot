@@ -29,6 +29,7 @@ Required environment variables: same as analyze.py.
 """
 import csv
 import io
+import json
 import math
 import time
 from datetime import datetime, timedelta
@@ -54,6 +55,10 @@ WEIGHTS_FULL = {"market": 0.25, "sector": 0.25, "stock": 0.50}
 
 INDUSTRY_MAP_KV_KEY = "industry_map_v1"
 INDEX_TOKEN_KV_KEY = "index_token_v1"
+EQ_TOKEN_KV_KEY = "nse_eq_tokens_v1"          # symbol -> Angel token for every NSE "-EQ" stock
+INDEX_NAME_KV_KEY = "nse_index_names_v1"      # normalised index name -> Angel index token
+OUTLOOK_KV_PREFIX = "outlook_v1_"
+OUTLOOK_TTL = 3 * 3600                        # per-symbol result cache, shared across devices
 SECTOR_OHLCV_KV_PREFIX = "sector_ohlcv_v1_"
 
 # Nifty 500 constituent list -- its "Industry" column is what maps a
@@ -87,6 +92,7 @@ SECTOR_RULES = [
 ]
 
 _industry_map_cache = {"data": None}
+_master_maps_cache = {"eq": None, "index": None}
 
 
 # ---------------------------------------------------------------------
@@ -140,6 +146,19 @@ def _f(value, digits=2):
 
 def _clip(value, low=-100.0, high=100.0):
     return max(low, min(high, value))
+
+
+def _jsonable(obj):
+    "Round-trips through JSON so numpy scalars can't break the KV cache or the HTTP response."
+    def default(o):
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.bool_):
+            return bool(o)
+        return str(o)
+    return json.loads(json.dumps(obj, default=default))
 
 
 def _bias_label(score):
@@ -397,6 +416,53 @@ def _combine(layer_scores):
     return sum(WEIGHTS_FULL[k] * v for k, v in available.items()) / total_weight
 
 
+def decide_action(composite, market, stock, patterns, levels, last_close):
+    """
+    Turns the outlook into one call: BUY / HOLD / SELL, plus a plain reason.
+    HOLD means "wait / no fresh entry" -- if you already own it, keep it.
+
+    SELL  composite <= -40, or the stock is in a downtrend below its 50 EMA,
+          or it just broke below its 20-day low while the composite is negative.
+    BUY   composite >= 50 AND the stock is in an uptrend above its 50 EMA AND
+          the market isn't in a downtrend AND RSI isn't stretched (<= 72) AND
+          the invalidation level (nearest support) is within 8% of price,
+          so the risk is a sensible size.
+    HOLD  everything else, with the reason that stopped it being a BUY.
+
+    These thresholds are judgment calls, not backtested numbers.
+    """
+    rsi = stock.get("rsi_14")
+    ema50 = stock.get("ema50")
+    label = stock.get("label")
+    below_ema50 = ema50 is not None and last_close < ema50
+    above_ema50 = ema50 is not None and last_close > ema50
+    broke_down = any(p["name"].startswith("Breakdown below") for p in patterns)
+
+    if composite <= -40:
+        return {"label": "SELL", "reason": f"Overall score {composite:+d}: trend, sector and market lean down. Avoid new buying; exit if you hold."}
+    if label == "Downtrend" and below_ema50:
+        return {"label": "SELL", "reason": "The stock is in a downtrend and trading below its 50 EMA. Avoid new buying; exit if you hold."}
+    if broke_down and composite < 0:
+        return {"label": "SELL", "reason": "The stock just broke below its 20-day low while the overall score is negative."}
+
+    support = levels.get("support")
+    risk_pct = (last_close - support) / last_close * 100 if support else None
+    market_down = bool(market) and "error" not in market and market.get("label") == "Downtrend"
+
+    if composite >= 50 and label == "Uptrend" and above_ema50:
+        if market_down:
+            return {"label": "HOLD", "reason": "The stock looks strong, but Nifty is in a downtrend. Wait for the market to stabilise before buying."}
+        if rsi is not None and rsi > 72:
+            return {"label": "HOLD", "reason": f"Trend is up but RSI {rsi} is stretched. Wait for a pullback instead of chasing."}
+        if risk_pct is not None and risk_pct > 8:
+            return {"label": "HOLD", "reason": f"Trend is up, but the invalidation level is {risk_pct:.1f}% below price, too wide for a sensible stop. Wait for a pullback."}
+        return {"label": "BUY", "reason": "Market, sector and stock trends line up, momentum is not stretched, and the stop level is close."}
+
+    if composite >= 20:
+        return {"label": "HOLD", "reason": "Leaning positive, but not strong or clean enough for a fresh buy yet. Wait for confirmation."}
+    return {"label": "HOLD", "reason": "No clear edge either way right now. Wait."}
+
+
 def _fmt(value):
     return f"₹{value:,.2f}" if value is not None else "n/a"
 
@@ -410,10 +476,11 @@ def _lower_first(text):
     return text[:1].lower() + text[1:] if text else text
 
 
-def _build_summary(symbol, bias, score, market, sector_name, sector, sector_rs, stock, patterns,
+def _build_summary(symbol, action, bias, score, market, sector_name, sector, sector_rs, stock, patterns,
                    rng, levels, alignment, missing_layers):
     lines = []
-    lines.append(f"{symbol}: {bias} bias for the next 5-10 trading days (score {score:+d} on a -100 to +100 scale).")
+    lines.append(f"{symbol}: {action['label']}. {action['reason']}")
+    lines.append(f"Overall bias: {bias} for the next 5-10 trading days (score {score:+d} on a -100 to +100 scale).")
 
     if market and "error" not in market:
         lines.append(f"Market: Nifty is in {_phrase(market['label'])} (trend strength {market['strength']}, RSI {market['rsi_14']}).")
@@ -503,16 +570,19 @@ def build_outlook(symbol, df, nifty_df=None, sector_name=None, sector_df=None, d
     levels = _levels(df, chart)
     rng = expected_range(df)
     alignment = _alignment_note(market, sector, stock["label"])
+    last_close = float(df["Close"].iloc[-1])
+    action = decide_action(composite, market, stock, patterns, levels, last_close)
 
     summary = _build_summary(
-        symbol, bias, composite, market, sector_name, sector, sector_rs_nifty,
+        symbol, action, bias, composite, market, sector_name, sector, sector_rs_nifty,
         stock, patterns, rng, levels, alignment, missing,
     )
 
-    return {
+    result = {
         "symbol": symbol,
         "as_of": str(pd.to_datetime(df["Date"].iloc[-1]).date()),
         "last_close": _f(df["Close"].iloc[-1]),
+        "action": action,
         "bias": bias,
         "score": composite,
         "summary": summary,
@@ -529,8 +599,9 @@ def build_outlook(symbol, df, nifty_df=None, sector_name=None, sector_df=None, d
         "expected_range": rng,
         "alignment": alignment,
         "data_notes": data_notes,
-        "disclaimer": "A probabilistic bias from price data, not a prediction or advice. Cut-off levels matter more than the label.",
+        "disclaimer": "A rule-based read of price data, not a prediction or advice. The Buy/Hold/Sell thresholds are judgment calls and have not been backtested. The cut-off level matters more than the label.",
     }
+    return _jsonable(result)
 
 
 # ---------------------------------------------------------------------
@@ -604,12 +675,80 @@ def _sector_for(symbol):
     return None, None, industry
 
 
+def _load_token_maps():
+    """
+    (eq_map, index_by_name) built from Angel's instrument master -- a
+    ~30 MB download that analyze._get_token repeats on every cold start.
+    Here it is downloaded at most once per day: both small maps are kept
+    in memory and in KV, so every later request (and every other symbol)
+    skips the download. Returns (None, None) if the master can't be read.
+    """
+    import analyze
+
+    if _master_maps_cache["eq"] is not None:
+        return _master_maps_cache["eq"], _master_maps_cache["index"]
+
+    eq_map = analyze._kv_get(EQ_TOKEN_KV_KEY)
+    index_map = analyze._kv_get(INDEX_NAME_KV_KEY)
+    if eq_map and index_map:
+        _master_maps_cache["eq"], _master_maps_cache["index"] = eq_map, index_map
+        return eq_map, index_map
+
+    try:
+        resp = requests.get(analyze.INSTRUMENT_MASTER_URL, timeout=60)
+        resp.raise_for_status()
+        instruments = resp.json()
+    except Exception:
+        return None, None
+
+    eq_map, index_map = {}, {}
+    for inst in instruments:
+        if inst.get("exch_seg") != "NSE":
+            continue
+        token = str(inst.get("token", ""))
+        symbol = inst.get("symbol", "")
+        if symbol.endswith("-EQ"):
+            eq_map.setdefault(symbol[:-3], token)
+        elif inst.get("instrumenttype") in ("AMXIDX", "", None) and token.startswith("999"):
+            for field in ("name", "symbol"):
+                key = _normalise_name(inst.get(field, ""))
+                if key:
+                    index_map.setdefault(key, token)
+
+    if eq_map:
+        _master_maps_cache["eq"], _master_maps_cache["index"] = eq_map, index_map
+        analyze._kv_set(EQ_TOKEN_KV_KEY, eq_map, 24 * 3600)
+        analyze._kv_set(INDEX_NAME_KV_KEY, index_map, MAP_TTL)
+        return eq_map, index_map
+    return None, None
+
+
+def _prime_stock_token(symbol):
+    """
+    Puts the stock's Angel token into analyze's own token cache so
+    analyze._fetch_ohlcv doesn't download the whole master itself.
+    Returns False only when the master was read and the symbol isn't in
+    it (i.e. definitely not an NSE equity); True otherwise.
+    """
+    import analyze
+
+    if symbol in analyze._token_cache:
+        return True
+    eq_map, _ = _load_token_maps()
+    if eq_map is None:
+        return True  # couldn't read the master; let analyze try its own way
+    token = eq_map.get(symbol)
+    if token:
+        analyze._token_cache[symbol] = token
+        return True
+    return False
+
+
 def _resolve_index_token(aliases):
     """
     Finds a working Angel token for the first alias that returns candles.
     Returns (token, candles_df) or (None, None). The working token is
-    remembered in KV so the (large) instrument master is only downloaded
-    the first time.
+    remembered in KV, so this normally costs one candle call.
     """
     import analyze
 
@@ -620,21 +759,12 @@ def _resolve_index_token(aliases):
             if df is not None:
                 return token_map[alias], df
 
-    master_resp = requests.get(analyze.INSTRUMENT_MASTER_URL, timeout=60)
-    master_resp.raise_for_status()
-    by_name = {}
-    for inst in master_resp.json():
-        if inst.get("exch_seg") != "NSE":
-            continue
-        if inst.get("instrumenttype") not in ("AMXIDX", "", None):
-            continue
-        for field in ("name", "symbol"):
-            key = _normalise_name(inst.get(field, ""))
-            if key and key not in by_name and str(inst.get("token", "")).startswith("999"):
-                by_name[key] = str(inst["token"])
+    _eq, index_by_name = _load_token_maps()
+    if not index_by_name:
+        return None, None
 
     for alias in aliases:
-        amx_token = by_name.get(alias)
+        amx_token = index_by_name.get(alias)
         if not amx_token:
             continue
         # Angel's own docs disagree on which token form serves candles
@@ -697,12 +827,13 @@ def _fetch_sector_index(aliases):
     return df
 
 
-def get_outlook(symbol):
-    "Fetch stock + Nifty + sector candles and build the outlook. Never raises."
+def _compute_outlook(symbol):
     import analyze
 
-    symbol = symbol.strip().upper()
     notes = []
+
+    if not _prime_stock_token(symbol):
+        return {"symbol": symbol, "error": "Could not fetch data. Check this is a valid NSE equity symbol."}
 
     try:
         df = analyze._fetch_ohlcv(symbol)
@@ -740,8 +871,31 @@ def get_outlook(symbol):
         return {"symbol": symbol, "error": f"Outlook calculation failed: {e}"}
 
 
+def get_outlook(symbol, use_cache=True):
+    """
+    Fetch stock + Nifty + sector candles and build the outlook. Never raises.
+    Successful results are cached in KV for OUTLOOK_TTL so the dashboard's
+    Buy/Hold/Sell badges (one call per ticker) don't hit Angel again for
+    a symbol someone already loaded a few hours ago. Errors are not cached.
+    """
+    import analyze
+
+    symbol = symbol.strip().upper()
+    key = OUTLOOK_KV_PREFIX + symbol
+
+    if use_cache:
+        cached = analyze._kv_get(key)
+        if cached and cached.get("action") and "error" not in cached:
+            cached["cached"] = True
+            return cached
+
+    result = _compute_outlook(symbol)
+    if "error" not in result:
+        analyze._kv_set(key, result, OUTLOOK_TTL)
+    return result
+
+
 if __name__ == "__main__":
-    import json
     import sys
 
     sym = sys.argv[1] if len(sys.argv) > 1 else "RELIANCE"
