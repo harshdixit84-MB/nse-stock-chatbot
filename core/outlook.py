@@ -55,9 +55,10 @@ WEIGHTS_FULL = {"market": 0.25, "sector": 0.25, "stock": 0.50}
 
 INDUSTRY_MAP_KV_KEY = "industry_map_v1"
 INDEX_TOKEN_KV_KEY = "index_token_v1"
-EQ_TOKEN_KV_KEY = "nse_eq_tokens_v1"          # symbol -> Angel token for every NSE "-EQ" stock
+EQ_TOKEN_KV_KEY = "nse_eq_tokens_v2"          # symbol -> Angel token for NSE stocks (-EQ, else -BE/-BZ/...)
 INDEX_NAME_KV_KEY = "nse_index_names_v1"      # normalised index name -> Angel index token
 OUTLOOK_KV_PREFIX = "outlook_v1_"
+ALT_SERIES = ("-BE", "-BZ", "-SM", "-ST", "-BL")
 OUTLOOK_TTL = 3 * 3600                        # per-symbol result cache, shared across devices
 SECTOR_OHLCV_KV_PREFIX = "sector_ohlcv_v1_"
 
@@ -701,7 +702,7 @@ def _load_token_maps():
     except Exception:
         return None, None
 
-    eq_map, index_map = {}, {}
+    eq_map, alt_map, index_map = {}, {}, {}
     for inst in instruments:
         if inst.get("exch_seg") != "NSE":
             continue
@@ -709,11 +710,19 @@ def _load_token_maps():
         symbol = inst.get("symbol", "")
         if symbol.endswith("-EQ"):
             eq_map.setdefault(symbol[:-3], token)
+        elif symbol[-3:] in ALT_SERIES:
+            # Stocks that trade in another series for a while (trade-to-trade "-BE",
+            # "-BZ", SME "-SM"/"-ST"...) have no "-EQ" entry. Same company, same
+            # candles: use them only when there is no "-EQ" row.
+            alt_map.setdefault(symbol[:-3], token)
         elif inst.get("instrumenttype") in ("AMXIDX", "", None) and token.startswith("999"):
             for field in ("name", "symbol"):
                 key = _normalise_name(inst.get(field, ""))
                 if key:
                     index_map.setdefault(key, token)
+
+    for symbol, token in alt_map.items():
+        eq_map.setdefault(symbol, token)
 
     if eq_map:
         _master_maps_cache["eq"], _master_maps_cache["index"] = eq_map, index_map
