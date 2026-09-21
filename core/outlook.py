@@ -836,7 +836,28 @@ def _fetch_sector_index(aliases):
     return df
 
 
-def _compute_outlook(symbol):
+def _shared_nifty(shared):
+    "Nifty candles, fetched once per batch request (and KV-cached across requests by analyze itself)."
+    import analyze
+
+    if shared is not None and "nifty" in shared:
+        return shared["nifty"]
+    try:
+        df = analyze._fetch_index_ohlcv()
+    except Exception:
+        df = None
+    if shared is not None:
+        shared["nifty"] = df
+    return df
+
+
+def _compute_outlook(symbol, shared=None):
+    """
+    `shared` (batch requests only) holds market data reused across the
+    symbols of one request: the Nifty candles and each sector index, so a
+    batch of 8 stocks costs 8 stock fetches plus one Nifty and one fetch per
+    distinct sector, instead of up to 3 Angel calls per stock.
+    """
     import analyze
 
     notes = []
@@ -851,10 +872,7 @@ def _compute_outlook(symbol):
     if df is None or df.empty:
         return {"symbol": symbol, "error": "Could not fetch data. Check this is a valid NSE equity symbol."}
 
-    try:
-        nifty_df = analyze._fetch_index_ohlcv()
-    except Exception:
-        nifty_df = None
+    nifty_df = _shared_nifty(shared)
     if nifty_df is None:
         notes.append("Nifty data could not be fetched right now.")
 
@@ -862,7 +880,12 @@ def _compute_outlook(symbol):
     try:
         label, aliases, industry = _sector_for(symbol)
         if label:
-            sector_df = _fetch_sector_index(aliases)
+            if shared is not None and aliases[0] in shared["sectors"]:
+                sector_df = shared["sectors"][aliases[0]]
+            else:
+                sector_df = _fetch_sector_index(aliases)
+                if shared is not None:
+                    shared["sectors"][aliases[0]] = sector_df
             if sector_df is not None:
                 sector_name = label
             else:
@@ -880,7 +903,7 @@ def _compute_outlook(symbol):
         return {"symbol": symbol, "error": f"Outlook calculation failed: {e}"}
 
 
-def get_outlook(symbol, use_cache=True):
+def get_outlook(symbol, use_cache=True, shared=None):
     """
     Fetch stock + Nifty + sector candles and build the outlook. Never raises.
     Successful results are cached in KV for OUTLOOK_TTL so the dashboard's
@@ -898,10 +921,54 @@ def get_outlook(symbol, use_cache=True):
             cached["cached"] = True
             return cached
 
-    result = _compute_outlook(symbol)
+    result = _compute_outlook(symbol, shared)
     if "error" not in result:
         analyze._kv_set(key, result, OUTLOOK_TTL)
     return result
+
+
+RATE_LIMIT_MARKERS = ("rate-limit", "rate limit", "exceeding access rate", "too many requests")
+BATCH_MAX_SYMBOLS = 12
+BATCH_TIME_LIMIT_SECONDS = 48   # Vercel stops the function at 60 s
+
+
+def get_outlook_batch(symbols, use_cache=False, pace=1.0, time_limit=BATCH_TIME_LIMIT_SECONDS):
+    """
+    Several symbols in one request, for the daily 4 PM run (outlook_batch.py in
+    the Harsh repo). Compared with one request per symbol it fetches Nifty and
+    each sector once per batch and spaces the stock fetches by `pace` seconds,
+    which is what keeps a 250-ticker run under Angel's rate limit.
+
+    Returns {"results": {SYMBOL: outlook_or_error}, "elapsed": seconds}. An
+    error entry carries "retry": True when trying it again later makes sense
+    (rate limit, Nifty unavailable, or not reached before the time limit).
+    Stops early on a rate limit: the remaining symbols would only fail too.
+    """
+    started = time.time()
+    symbols = [s.strip().upper() for s in symbols if s.strip()][:BATCH_MAX_SYMBOLS]
+    pace = max(0.0, min(float(pace), 8.0))
+    shared = {"sectors": {}}
+    results = {}
+    stop_reason = None
+
+    if _shared_nifty(shared) is None:
+        stop_reason = "Nifty data could not be fetched (Angel may be rate-limiting); try again shortly."
+
+    for symbol in symbols:
+        if stop_reason:
+            results[symbol] = {"symbol": symbol, "error": stop_reason, "retry": True}
+            continue
+        if time.time() - started > time_limit:
+            results[symbol] = {"symbol": symbol, "error": "not attempted: batch time limit reached", "retry": True}
+            continue
+        result = get_outlook(symbol, use_cache=use_cache, shared=shared)
+        if "error" in result and any(m in str(result["error"]).lower() for m in RATE_LIMIT_MARKERS):
+            result["retry"] = True
+            stop_reason = str(result["error"])
+        results[symbol] = result
+        time.sleep(pace)
+
+    return {"results": results, "elapsed": round(time.time() - started, 1)}
 
 
 if __name__ == "__main__":

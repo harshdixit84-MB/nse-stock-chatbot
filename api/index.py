@@ -106,6 +106,28 @@ class handler(BaseHTTPRequestHandler):
         include_narrative = query.get("narrative", ["false"])[0].strip().lower() in ("1", "true", "yes")
         mode = query.get("mode", [""])[0].strip().lower()
 
+        if mode == "outlook_batch":
+            # Several symbols in one request, for the daily 4 PM run (outlook_batch.py in the Harsh repo).
+            try:
+                import outlook
+                symbols = [x for x in query.get("symbols", [""])[0].split(",") if x.strip()]
+                fresh = query.get("fresh", [""])[0].strip().lower() in ("1", "true", "yes")
+                try:
+                    pace = float(query.get("pace", ["1.0"])[0])
+                except ValueError:
+                    pace = 1.0
+                result = outlook.get_outlook_batch(symbols, use_cache=not fresh, pace=pace) if symbols else {"error": "Missing 'symbols' query parameter"}
+                status = 200 if symbols else 400
+            except Exception as e:
+                result = {"error": str(e)}
+                status = 500
+            self.send_response(status)
+            self.send_header("Content-type", "application/json")
+            self._send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result, default=str).encode())
+            return
+
         if not symbol:
             self.send_response(400)
             self.send_header("Content-type", "application/json")
